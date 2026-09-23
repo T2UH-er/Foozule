@@ -183,6 +183,7 @@ public class GameManager1 : MonoBehaviour
     /// <summary>Bốc khối đang nằm trên Khay.</summary>
     public void BeginPickFromTray(BlockPiece1 piece)
     {
+        if (GridManager1.Instance != null) GridManager1.Instance.ClearPlacementHighlight();
         HeldPiece = piece;
         startWorldPosition = piece.transform.position;
         isFromGrid = false;
@@ -194,6 +195,7 @@ public class GameManager1 : MonoBehaviour
     /// <summary>Bốc khối đang nằm trên Grid.</summary>
     public void BeginPickFromGrid(PlacedBlockInfo1 info)
     {
+        if (GridManager1.Instance != null) GridManager1.Instance.ClearPlacementHighlight();
         originalShape = info.shapeData;
         originalOriginCell = info.originCell;
         originalItems = info.itemPerCell;
@@ -221,12 +223,30 @@ public class GameManager1 : MonoBehaviour
         if (HeldPiece == null) return;
         HeldPiece.transform.position = targetWorldPos;
         Physics2D.SyncTransforms();
+
+        if (GridManager1.Instance != null && HeldPiece.shapeData != null)
+        {
+            Vector2Int targetCell = GridManager1.Instance.WorldToCell(HeldPiece.transform.position);
+            if (GridManager1.Instance.CanPlace(HeldPiece.shapeData, targetCell))
+            {
+                GridManager1.Instance.HighlightPlacement(HeldPiece.shapeData, targetCell);
+            }
+            else
+            {
+                GridManager1.Instance.ClearPlacementHighlight();
+            }
+        }
     }
 
     /// <summary>Xử lý thả khối — quyết định đặt, trả về, hay hủy.</summary>
     public void EndDrag(Vector3 releaseWorldPos)
     {
         if (HeldPiece == null) return;
+
+        if (GridManager1.Instance != null)
+        {
+            GridManager1.Instance.ClearPlacementHighlight();
+        }
 
         Vector2Int targetCell = GridManager1.Instance.WorldToCell(HeldPiece.transform.position);
 
@@ -243,7 +263,7 @@ public class GameManager1 : MonoBehaviour
 
             // Thông báo cho Spawner nếu khối đến từ khay
             if (HeldPiece.slotIndex >= 0 && BlockSpawner1.Instance != null)
-                BlockSpawner1.Instance.OnPiecePlaced(HeldPiece.slotIndex);
+                BlockSpawner1.Instance.OnPiecePlaced(HeldPiece.slotIndex, HeldPiece);
 
             Destroy(HeldPiece.gameObject);
 

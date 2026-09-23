@@ -284,7 +284,7 @@ public class TutorialManager1 : MonoBehaviour
             tapToContinueText.fontStyle = FontStyles.Bold;
             tapToContinueText.color = new Color(0.35f, 0.35f, 0.4f, 1f);
             tapToContinueText.alignment = TextAlignmentOptions.Center;
-            tapToContinueText.text = "<b>— Chạm bất kỳ để tiếp tục ▾ —</b>";
+            tapToContinueText.text = "<b>— Chạm bất kỳ để tiếp tục —</b>";
             tapToContinueText.raycastTarget = false;
         }
         else

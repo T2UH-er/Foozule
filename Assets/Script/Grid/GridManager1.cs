@@ -33,6 +33,30 @@ public class GridManager1 : MonoBehaviour
 
     public GameObject cellSlotPrefab;
 
+    [Header("Drag Placement Highlight Settings")]
+    [Tooltip("Bật/tắt tính năng sáng các ô trên bàn cờ khi kéo món ăn vào")]
+    public bool enablePlacementHighlight = true;
+
+    [Tooltip("Màu phát sáng (soft glow) của lòng ô bình thường khi món ăn rê vào")]
+    public Color normalCellHighlightColor = new Color(1f, 0.95f, 0.5f, 0.85f);
+
+    [Tooltip("Màu khung viền bo tròn phát sáng (luminous border frame) hiển thị phạm vi đặt cho tất cả các ô")]
+    public Color frameHighlightColor = new Color(1f, 0.96f, 0.6f, 0.95f);
+
+    [Tooltip("Nếu true: Các ô thuộc vùng của khách hàng sẽ được giữ nguyên màu sắc gốc của khách, chỉ tăng độ sáng rực rỡ chứ không bị ám vàng")]
+    public bool skipCustomerCells = true;
+
+    [Tooltip("Màu phát sáng nhẹ bên dưới ô của khách hàng nếu skipCustomerCells = false")]
+    public Color customerCellHighlightColor = new Color(1f, 1f, 1f, 0.25f);
+
+    private GameObject[,] cellSlots;
+    private GameObject[,] highlightOverlays;
+    private SpriteRenderer[,] highlightRenderers;
+    private GameObject[,] frameOverlays;
+    private SpriteRenderer[,] frameRenderers;
+    private static Sprite _frameBorderSprite;
+    private HashSet<Vector2Int> currentlyHighlightedCells = new HashSet<Vector2Int>();
+
     private ItemData1[,] cellItems;
     private GameObject[,] cellVisuals;
     public bool[,] isBlocked;
@@ -80,6 +104,55 @@ public class GridManager1 : MonoBehaviour
         RebuildVisualGrid();
     }
 
+    private static Sprite GetFrameBorderSprite()
+    {
+        if (_frameBorderSprite != null) return _frameBorderSprite;
+
+        int N = 128;
+        Texture2D tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        tex.filterMode = FilterMode.Bilinear;
+
+        Color[] colors = new Color[N * N];
+        float pad = 3f;
+        float H = (N - 1) / 2.0f - pad;
+        float R = 14f;
+        float T = 9f;
+        float bx = H - R;
+        float by = H - R;
+        float center = (N - 1) / 2.0f;
+
+        for (int y = 0; y < N; y++)
+        {
+            for (int x = 0; x < N; x++)
+            {
+                float px = Mathf.Abs(x - center);
+                float py = Mathf.Abs(y - center);
+
+                float qx = px - bx;
+                float qy = py - by;
+
+                float dx = Mathf.Max(qx, 0f);
+                float dy = Mathf.Max(qy, 0f);
+                float dist_out = Mathf.Sqrt(dx * dx + dy * dy);
+                float dist_in = Mathf.Min(Mathf.Max(qx, qy), 0f);
+                float d = dist_out + dist_in - R;
+
+                float outerAlpha = Mathf.Clamp01(0.5f - d);
+                float innerAlpha = Mathf.Clamp01(d + T + 0.5f);
+                float a = outerAlpha * innerAlpha;
+
+                colors[y * N + x] = new Color(1f, 1f, 1f, a);
+            }
+        }
+
+        tex.SetPixels(colors);
+        tex.Apply();
+
+        _frameBorderSprite = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), N);
+        return _frameBorderSprite;
+    }
+
     public void RebuildVisualGrid()
     {
         // Xoa cell slot cu
@@ -91,17 +164,69 @@ public class GridManager1 : MonoBehaviour
         float ratio = ScaleRatio;
         Vector3 slotScale = initialCellSlotPrefabScale * ratio;
 
+        cellSlots = new GameObject[width, height];
+        highlightOverlays = new GameObject[width, height];
+        highlightRenderers = new SpriteRenderer[width, height];
+        frameOverlays = new GameObject[width, height];
+        frameRenderers = new SpriteRenderer[width, height];
+        currentlyHighlightedCells.Clear();
+
+        Sprite frameSprite = GetFrameBorderSprite();
+
         for (int x = 0; x < width; x++)
         {
             for (int y = 0; y < height; y++)
             {
                 GameObject slot = Instantiate(cellSlotPrefab, CellToWorld(x, y), Quaternion.identity, transform);
                 slot.transform.localScale = slotScale;
+                cellSlots[x, y] = slot;
 
                 if (isBlocked != null && isBlocked[x, y])
                 {
                     SpriteRenderer sr = slot.GetComponentInChildren<SpriteRenderer>();
                     if (sr != null) sr.color = new Color(0.2f, 0.2f, 0.2f, 1f); // Mau den xam
+                }
+                else
+                {
+                    SpriteRenderer slotSr = slot.GetComponentInChildren<SpriteRenderer>();
+
+                    // 1. Tạo Highlight Overlay (Soft Glow lòng trong) cho ô trung tính
+                    GameObject hl = new GameObject($"Highlight_{x}_{y}");
+                    hl.transform.SetParent(slot.transform, false);
+                    hl.transform.localPosition = Vector3.zero;
+                    hl.transform.localScale = Vector3.one;
+
+                    SpriteRenderer hlSr = hl.AddComponent<SpriteRenderer>();
+                    if (slotSr != null) hlSr.sprite = slotSr.sprite;
+                    hlSr.sortingOrder = 1;
+                    hlSr.color = normalCellHighlightColor;
+                    hl.SetActive(false);
+
+                    highlightOverlays[x, y] = hl;
+                    highlightRenderers[x, y] = hlSr;
+
+                    // 2. Tạo Frame Overlay (Viền bo tròn sắc nét) hiển thị footprint trên mọi loại ô
+                    GameObject frameObj = new GameObject($"Frame_{x}_{y}");
+                    frameObj.transform.SetParent(slot.transform, false);
+                    if (slotSr != null && slotSr.sprite != null)
+                    {
+                        frameObj.transform.localPosition = slotSr.sprite.bounds.center;
+                        frameObj.transform.localScale = slotSr.sprite.bounds.size;
+                    }
+                    else
+                    {
+                        frameObj.transform.localPosition = Vector3.zero;
+                        frameObj.transform.localScale = Vector3.one;
+                    }
+
+                    SpriteRenderer frameSr = frameObj.AddComponent<SpriteRenderer>();
+                    frameSr.sprite = frameSprite;
+                    frameSr.sortingOrder = 4;
+                    frameSr.color = frameHighlightColor;
+                    frameObj.SetActive(false);
+
+                    frameOverlays[x, y] = frameObj;
+                    frameRenderers[x, y] = frameSr;
                 }
             }
         }
@@ -388,6 +513,8 @@ public class GridManager1 : MonoBehaviour
         totalFlavorCounts["bitter"] = 0;
         totalFlavorCounts["umami"] = 0;
         totalFlavorCounts["buttery"] = 0;
+
+        ClearPlacementHighlight();
     }
 
     void ClearCell(int x, int y)
@@ -408,5 +535,142 @@ public class GridManager1 : MonoBehaviour
                     if (CanPlace(shape, new Vector2Int(x, y))) return true;
         }
         return false;
+    }
+
+    // ─── Drag Placement Highlight API ─────────────────────────────────────
+
+    /// <summary>
+    /// Kiểm tra xem ô (cell) có nằm trong vùng ảnh hưởng (affectedZone) của bất kỳ khách hàng nào không.
+    /// </summary>
+    public bool IsCellInCustomerZone(Vector2Int cell)
+    {
+        if (CustomerSpawner1.Instance != null && CustomerSpawner1.Instance.currentCustomers != null)
+        {
+            for (int i = 0; i < CustomerSpawner1.Instance.currentCustomers.Count; i++)
+            {
+                var customer = CustomerSpawner1.Instance.currentCustomers[i];
+                if (customer != null && customer.affectedZone != null && customer.affectedZone.Contains(cell))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Làm sáng các ô trên bàn cờ khi đang kéo khối món ăn vào vị trí hợp lệ.
+    /// Không làm ảnh hưởng hay đổi màu các ô đã thuộc về khách hàng (giữ nguyên màu sắc của khách).
+    /// </summary>
+    public void HighlightPlacement(BlockShapeData shape, Vector2Int originCell)
+    {
+        if (!enablePlacementHighlight || shape == null || shape.cells == null)
+        {
+            ClearPlacementHighlight();
+            return;
+        }
+
+        HashSet<Vector2Int> newCells = new HashSet<Vector2Int>();
+        for (int i = 0; i < shape.cells.Length; i++)
+        {
+            Vector2Int pos = originCell + shape.cells[i];
+            if (IsInsideGrid(pos))
+            {
+                newCells.Add(pos);
+            }
+        }
+
+        // Tắt những ô không còn nằm trong vùng hover
+        List<Vector2Int> toRemove = new List<Vector2Int>();
+        foreach (var pos in currentlyHighlightedCells)
+        {
+            if (!newCells.Contains(pos))
+            {
+                SetCellHighlight(pos, false);
+                toRemove.Add(pos);
+            }
+        }
+        for (int i = 0; i < toRemove.Count; i++)
+        {
+            currentlyHighlightedCells.Remove(toRemove[i]);
+        }
+
+        // Bật những ô mới
+        foreach (var pos in newCells)
+        {
+            if (!currentlyHighlightedCells.Contains(pos))
+            {
+                SetCellHighlight(pos, true);
+                currentlyHighlightedCells.Add(pos);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tắt toàn bộ hiệu ứng sáng trên bàn cờ.
+    /// </summary>
+    public void ClearPlacementHighlight()
+    {
+        if (currentlyHighlightedCells == null || currentlyHighlightedCells.Count == 0) return;
+
+        foreach (var pos in currentlyHighlightedCells)
+        {
+            SetCellHighlight(pos, false);
+        }
+        currentlyHighlightedCells.Clear();
+    }
+
+    private void SetCustomerZoneHighlight(Vector2Int cell, bool active)
+    {
+        if (CustomerSpawner1.Instance != null && CustomerSpawner1.Instance.currentCustomers != null)
+        {
+            for (int i = 0; i < CustomerSpawner1.Instance.currentCustomers.Count; i++)
+            {
+                var customer = CustomerSpawner1.Instance.currentCustomers[i];
+                if (customer != null && customer.affectedZone != null && customer.affectedZone.Contains(cell))
+                {
+                    customer.SetZoneCellHighlighted(cell, active);
+                }
+            }
+        }
+    }
+
+    private void SetCellHighlight(Vector2Int pos, bool active)
+    {
+        if (pos.x < 0 || pos.x >= width || pos.y < 0 || pos.y >= height) return;
+
+        // 1. Luôn bật/tắt khung viền bo tròn (frame border) để người chơi thấy rõ phạm vi ô đặt
+        if (frameOverlays != null && frameOverlays[pos.x, pos.y] != null)
+        {
+            if (active && frameRenderers != null && frameRenderers[pos.x, pos.y] != null)
+            {
+                frameRenderers[pos.x, pos.y].color = frameHighlightColor;
+            }
+            frameOverlays[pos.x, pos.y].SetActive(active);
+        }
+
+        bool isCustomerCell = IsCellInCustomerZone(pos);
+
+        if (isCustomerCell)
+        {
+            // 2. Với ô thuộc khách hàng: Không dùng soft glow vàng làm bẩn màu khách
+            if (highlightOverlays != null && highlightOverlays[pos.x, pos.y] != null)
+            {
+                highlightOverlays[pos.x, pos.y].SetActive(false);
+            }
+
+            // Tăng sáng trực tiếp màu vùng của khách hàng tương ứng (hoặc khôi phục màu gốc khi un-highlight)
+            SetCustomerZoneHighlight(pos, active);
+        }
+        else
+        {
+            // 3. Với ô trung tính: Bật/tắt lớp ánh sáng soft glow ấm áp
+            if (highlightOverlays != null && highlightOverlays[pos.x, pos.y] != null)
+            {
+                if (active && highlightRenderers != null && highlightRenderers[pos.x, pos.y] != null)
+                {
+                    highlightRenderers[pos.x, pos.y].color = normalCellHighlightColor;
+                }
+                highlightOverlays[pos.x, pos.y].SetActive(active);
+            }
+        }
     }
 }

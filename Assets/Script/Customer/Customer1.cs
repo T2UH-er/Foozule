@@ -214,6 +214,40 @@ public class Customer1 : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Tăng độ sáng và độ phủ màu của ô thuộc vùng khách hàng khi có khối thức ăn rê qua,
+    /// và khôi phục lại màu zoneColor gốc khi khối rời đi.
+    /// Giúp người chơi nhận diện rõ ô sẽ đặt mà không bị đổi màu vùng đặc trưng của khách.
+    /// </summary>
+    public void SetZoneCellHighlighted(Vector2Int cell, bool highlighted)
+    {
+        if (affectedZone == null || zoneOverlays == null) return;
+        int index = affectedZone.IndexOf(cell);
+        if (index < 0 || index >= zoneOverlays.Count) return;
+
+        GameObject overlay = zoneOverlays[index];
+        if (overlay == null) return;
+
+        SpriteRenderer sr = overlay.GetComponent<SpriteRenderer>();
+        if (sr == null) return;
+
+        if (highlighted)
+        {
+            // Tăng độ sáng và độ rực rỡ (RGB) và độ rõ (Alpha) của chính màu khách
+            Color brightColor = new Color(
+                Mathf.Min(1f, zoneColor.r * 1.35f + 0.18f),
+                Mathf.Min(1f, zoneColor.g * 1.35f + 0.18f),
+                Mathf.Min(1f, zoneColor.b * 1.35f + 0.18f),
+                Mathf.Min(0.88f, Mathf.Max(0.72f, zoneColor.a * 2.2f))
+            );
+            sr.color = brightColor;
+        }
+        else
+        {
+            sr.color = this.zoneColor;
+        }
+    }
+
     private void OnDestroy()
     {
         foreach (var go in zoneOverlays)
@@ -281,8 +315,16 @@ public class Customer1 : MonoBehaviour
                buttery >= GetRequirementCount("buttery");
     }
 
-    private void OnMouseDown()
+    /// <summary>
+    /// Được gọi khi người chơi click/chạm vào khách hàng trên màn hình (thông qua New Input System).
+    /// </summary>
+    public void OnCustomerTapped()
     {
         if (bubble != null) bubble.ShowBubble();
+    }
+
+    private void OnMouseDown()
+    {
+        OnCustomerTapped();
     }
 }

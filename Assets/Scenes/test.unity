@@ -1469,7 +1469,7 @@ MonoBehaviour:
   trayContainer: {fileID: 1157675534}
   trayBlockScale: {x: 0.6, y: 0.6, z: 0.6}
   totalBlocksCount: 10
-  slotSpacing: 20
+  slotSpacing: 13.5
   currentPieces: []
 --- !u!4 &749525917
 Transform:
